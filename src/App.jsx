@@ -1,224 +1,137 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
-  BrainCircuit, 
-  User, 
+  Brain, 
+  UserSquare2, 
   AlertTriangle, 
-  ListPlus, 
+  ListTree, 
+  RotateCcw, 
   Send, 
-  Loader2, 
-  Copy, 
-  CheckCheck,
-  RefreshCw,
-  MessageSquareQuote
+  Sparkles,
+  Loader2
 } from 'lucide-react';
 
-/**
- * API Helper with Exponential Backoff
- * This function handles the communication with the Gemini API.
- * The apiKey is left empty as it is provided by the execution environment.
- */
-const callGemini = async (prompt, systemInstruction) => {
-  const apiKey = "AIzaSyA5gOfetlZxzpR-YM4W9FN-rXdCcUiNfPs"; 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+const App = () => {
+  const [activeTab, setActiveTab] = useState('externalize');
+  const [input, setInput] = useState('');
+  const [feedback, setFeedback] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const payload = {
-    contents: [{ parts: [{ text: prompt }] }],
-    systemInstruction: { parts: [{ text: systemInstruction }] }
+  // YOUR API KEY (Keep this safe! Since it's public on GitHub, anyone can see it)
+  const apiKey = "AIzaSyA5gOfetlZxzpR-YM4W9FN-rXdCcUiNfPs";
+
+  const techniques = {
+    externalize: {
+      title: "Externalize Brain",
+      icon: <Brain className="w-6 h-6" />,
+      description: "Turn messy thoughts into a structured prompt.",
+      quote: "Externalize your brain... just take that thing you said and write it down.",
+      systemInstruction: "You are an expert prompt engineer. The user is providing raw, messy thoughts. Your job is to restructure these into a clear, high-quality prompt. Use clear headings and variables like {{VARIABLE}} where appropriate."
+    },
+    tempAgency: {
+      title: "Temp Agency Test",
+      icon: <UserSquare2 className="w-6 h-6" />,
+      description: "Check if your prompt relies on hidden context.",
+      quote: "Imagine you're sending this to a temp agency. Do they have everything they need?",
+      systemInstruction: "Evaluate the user's prompt as if you were a temp worker with no context. Identify missing information, ambiguous terms, or assumptions the user is making."
+    },
+    edgeCase: {
+      title: "Edge Case Red-Team",
+      icon: <AlertTriangle className="w-6 h-6" />,
+      description: "Find failure modes & give the model an out.",
+      quote: "Give the model an out if it doesn't know the answer.",
+      systemInstruction: "Analyze the user's prompt for potential 'edge cases' or failure modes. Suggest ways to improve the prompt to handle situations where the model might hallucinate or fail."
+    },
+    examples: {
+      title: "Illustrative Examples",
+      icon: <ListTree className="w-6 h-6" />,
+      description: "Generate diverse examples to anchor the model.",
+      quote: "Show, don't just tell. Give the model examples of what good looks like.",
+      systemInstruction: "Based on the user's goal, provide 3 diverse examples (few-shot prompting) that clearly demonstrate the desired input-output format."
+    }
   };
 
-  const maxRetries = 5;
-  const baseDelay = 1000;
+  const handleAnalyze = async () => {
+    if (!input.trim()) return;
+    
+    setIsLoading(true);
+    setFeedback('');
 
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
+      // CRITICAL: We use backticks (`) here to allow the ${apiKey} to be inserted
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+      
+      const payload = {
+        contents: [{
+          parts: [{ text: input }]
+        }],
+        systemInstruction: {
+          parts: [{ text: techniques[activeTab].systemInstruction }]
+        }
+      };
+
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
       const data = await response.json();
-      return data.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated.";
-    } catch (error) {
-      if (attempt === maxRetries - 1) {
-        throw new Error("Failed to connect to AI after multiple attempts. Please try again later.");
+      
+      if (data.error) {
+        throw new Error(data.error.message || "Failed to connect to AI.");
       }
-      await new Promise(resolve => setTimeout(resolve, baseDelay * Math.pow(2, attempt)));
-    }
-  }
-};
 
-export default function App() {
-  const [currentPrompt, setCurrentPrompt] = useState("");
-  const [activeTool, setActiveTool] = useState('braindump');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [aiResponse, setAiResponse] = useState("");
-  const [copied, setCopied] = useState(false);
-
-  const tools = [
-    {
-      id: 'braindump',
-      icon: BrainCircuit,
-      name: "Externalize Brain",
-      desc: "Turn messy thoughts into a structured prompt.",
-      quote: `"Externalize your brain... just take that thing you said and write it down."`,
-      sysPrompt: `You are an expert prompt engineer. Rewrite the user's messy thoughts into a highly structured, clear, and precise prompt. Use clear headings and constraints. Avoid cliché roles; explain the exact context and task clearly.`
-    },
-    {
-      id: 'tempagency',
-      icon: User,
-      name: "Temp Agency Test",
-      desc: "Check if your prompt relies on hidden context.",
-      quote: `"Imagine you hired a temp agency... they don't know your company."`,
-      sysPrompt: `You are a competent temp worker with no internal knowledge of the user's company. Critique the prompt: What is missing? What is ambiguous? What jargon is confusing?`
-    },
-    {
-      id: 'edgecases',
-      icon: AlertTriangle,
-      name: "Edge Case Red-Team",
-      desc: "Find failure modes & give the model an out.",
-      quote: `"If something weird happens, just output <unsure>."`,
-      sysPrompt: `Identify 3-4 edge cases for this prompt. Suggest specific text to "give the model an out" (e.g., instructions for empty data or impossible requests).`
-    },
-    {
-      id: 'examples',
-      icon: ListPlus,
-      name: "Illustrative Examples",
-      desc: "Generate diverse examples to anchor the model.",
-      quote: `"Teach the concept, not just the format."`,
-      sysPrompt: `Generate 3 highly diverse few-shot examples (Input/Output) for this task. Ensure they are distinct to help the model learn the core logic.`
-    }
-  ];
-
-  const activeToolData = tools.find(t => t.id === activeTool);
-
-  const handleRunTool = async () => {
-    if (!currentPrompt.trim()) return;
-    setIsProcessing(true);
-    setAiResponse("");
-    try {
-      const response = await callGemini(currentPrompt, activeToolData.sysPrompt);
-      setAiResponse(response);
+      const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "No feedback generated.";
+      setFeedback(aiText);
     } catch (error) {
-      setAiResponse(`Error: ${error.message}`);
+      console.error("Analysis Error:", error);
+      setFeedback(`Error: ${error.message}. Please check your internet connection or API key.`);
     } finally {
-      setIsProcessing(false);
+      setIsLoading(false);
     }
   };
 
-  const copyToClipboard = (text) => {
-    const textArea = document.createElement("textarea");
-    textArea.value = text;
-    document.body.appendChild(textArea);
-    textArea.select();
-    try {
-      document.execCommand('copy');
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy', err);
-    }
-    document.body.removeChild(textArea);
+  const reset = () => {
+    setInput('');
+    setFeedback('');
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col md:flex-row">
-      {/* Sidebar */}
-      <div className="w-full md:w-80 bg-white border-r border-slate-200 flex flex-col shadow-sm h-auto md:h-screen sticky top-0">
-        <div className="p-6 border-b border-slate-200 bg-slate-900 text-white">
-          <div className="flex items-center gap-2 mb-1">
-            <BrainCircuit className="w-6 h-6 text-indigo-400" />
-            <h1 className="text-xl font-bold tracking-tight">Prompt Builder <span className="text-indigo-400">Pro</span></h1>
-          </div>
-          <p className="text-xs text-slate-400 mt-2 font-medium uppercase tracking-wider">Anthropic Edition</p>
-        </div>
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-slate-900">
+      <header className="max-w-4xl mx-auto mb-8">
+        <h1 className="text-3xl font-bold flex items-center gap-2 mb-2">
+          <Sparkles className="text-indigo-600" /> Prompt Builder Pro
+        </h1>
+        <p className="text-slate-500 font-medium">Anthropic Edition (via Gemini 1.5 Flash)</p>
+      </header>
 
-        <div className="p-4 flex-1">
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4">Techniques</h2>
-          <div className="space-y-2">
-            {tools.map((tool) => (
+      <main className="max-w-4xl mx-auto space-y-6">
+        {/* Techniques Selection */}
+        <section>
+          <h2 className="text-xl font-semibold mb-4 text-slate-700">Techniques</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            {Object.entries(techniques).map(([key, tech]) => (
               <button
-                key={tool.id}
-                onClick={() => setActiveTool(tool.id)}
-                className={`w-full text-left p-3 rounded-xl transition-all border flex flex-col gap-1
-                  ${activeTool === tool.id ? 'bg-indigo-50 border-indigo-200 ring-1 ring-indigo-500/20' : 'bg-white border-slate-200 hover:bg-slate-50'}
-                `}
+                key={key}
+                onClick={() => setActiveTab(key)}
+                className={`p-4 text-left border-2 rounded-xl transition-all duration-200 ${
+                  activeTab === key 
+                  ? 'border-indigo-600 bg-indigo-50 shadow-sm' 
+                  : 'border-slate-200 bg-white hover:border-slate-300'
+                }`}
               >
-                <div className="flex items-center gap-3">
-                  <tool.icon className={`w-4 h-4 ${activeTool === tool.id ? 'text-indigo-600' : 'text-slate-400'}`} />
-                  <span className={`font-medium ${activeTool === tool.id ? 'text-indigo-900' : 'text-slate-700'}`}>{tool.name}</span>
+                <div className={`mb-2 ${activeTab === key ? 'text-indigo-600' : 'text-slate-400'}`}>
+                  {tech.icon}
                 </div>
-                <p className="text-xs text-slate-500 ml-7">{tool.desc}</p>
+                <h3 className="font-bold text-sm mb-1">{tech.title}</h3>
+                <p className="text-xs text-slate-500 leading-tight">{tech.description}</p>
               </button>
             ))}
           </div>
-        </div>
+        </section>
 
-        <div className="p-4 bg-slate-50 border-t border-slate-200 m-4 rounded-xl italic text-xs text-slate-600">
-          {activeToolData.quote}
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        <header className="bg-white border-b border-slate-200 p-4 flex justify-between items-center shrink-0">
-          <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-            <activeToolData.icon className="w-5 h-5 text-indigo-600" />
-            {activeToolData.name}
-          </h2>
-          <button onClick={() => setCurrentPrompt("")} className="text-sm text-slate-500 hover:text-slate-800 flex items-center gap-1">
-            <RefreshCw className="w-4 h-4" /> Reset
-          </button>
-        </header>
-
-        <div className="flex-1 overflow-auto p-4 md:p-6 bg-slate-50 flex flex-col lg:flex-row gap-6">
-          {/* Editor */}
-          <div className="flex-1 flex flex-col bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="bg-slate-100 border-b border-slate-200 px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Input</div>
-            <textarea
-              className="flex-1 w-full p-6 resize-none focus:outline-none text-slate-700 leading-relaxed"
-              placeholder="Enter your prompt or ideas here..."
-              value={currentPrompt}
-              onChange={(e) => setCurrentPrompt(e.target.value)}
-            />
-            <div className="p-4 border-t border-slate-100 flex justify-end">
-              <button
-                onClick={handleRunTool}
-                disabled={!currentPrompt.trim() || isProcessing}
-                className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-2.5 rounded-xl font-medium hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-sm"
-              >
-                {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                {isProcessing ? 'Thinking...' : 'Analyze'}
-              </button>
-            </div>
-          </div>
-
-          {/* Feedback */}
-          <div className="flex-1 flex flex-col bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-2 flex justify-between items-center">
-              <span className="text-xs font-semibold text-indigo-800 uppercase">Expert Feedback</span>
-              {aiResponse && (
-                <button onClick={() => copyToClipboard(aiResponse)} className="text-indigo-600 hover:text-indigo-800 text-xs flex items-center gap-1">
-                  {copied ? <CheckCheck className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
-              )}
-            </div>
-            <div className="flex-1 p-6 overflow-y-auto whitespace-pre-wrap text-slate-700 leading-relaxed">
-              {aiResponse || (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center">
-                  <activeToolData.icon className="w-10 h-10 mb-4 opacity-20" />
-                  <p>Run the analysis to see improvements.</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+        {/* Workspace */}
+        <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+          <div className="p-6 border-b border-slate-100 bg-slate-50/50">
+            <h2 className="text-2xl font-bold flex items-center gap-3">
+              {techniques[activeTab].icon} {techniques[activeTab].title
