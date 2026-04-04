@@ -16,7 +16,7 @@ const App = () => {
   const [feedback, setFeedback] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // YOUR API KEY (Keep this safe! Since it's public on GitHub, anyone can see it)
+  // YOUR API KEY
   const apiKey = "AIzaSyA5gOfetlZxzpR-YM4W9FN-rXdCcUiNfPs";
 
   const techniques = {
@@ -57,16 +57,11 @@ const App = () => {
     setFeedback('');
 
     try {
-      // CRITICAL: We use backticks (`) here to allow the ${apiKey} to be inserted
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
       
       const payload = {
-        contents: [{
-          parts: [{ text: input }]
-        }],
-        systemInstruction: {
-          parts: [{ text: techniques[activeTab].systemInstruction }]
-        }
+        contents: [{ parts: [{ text: input }] }],
+        systemInstruction: { parts: [{ text: techniques[activeTab].systemInstruction }] }
       };
 
       const response = await fetch(url, {
@@ -85,7 +80,7 @@ const App = () => {
       setFeedback(aiText);
     } catch (error) {
       console.error("Analysis Error:", error);
-      setFeedback(`Error: ${error.message}. Please check your internet connection or API key.`);
+      setFeedback(`Error: ${error.message}. Please check your connection or API key.`);
     } finally {
       setIsLoading(false);
     }
@@ -106,7 +101,6 @@ const App = () => {
       </header>
 
       <main className="max-w-4xl mx-auto space-y-6">
-        {/* Techniques Selection */}
         <section>
           <h2 className="text-xl font-semibold mb-4 text-slate-700">Techniques</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -130,8 +124,69 @@ const App = () => {
           </div>
         </section>
 
-        {/* Workspace */}
         <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
           <div className="p-6 border-b border-slate-100 bg-slate-50/50">
             <h2 className="text-2xl font-bold flex items-center gap-3">
-              {techniques[activeTab].icon} {techniques[activeTab].title
+              {techniques[activeTab].icon} {techniques[activeTab].title}
+            </h2>
+            <p className="italic text-slate-600 mt-2 text-sm">
+              "{techniques[activeTab].quote}"
+            </p>
+          </div>
+
+          <div className="p-6 space-y-6">
+            <div className="flex justify-between items-end">
+              <label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Input</label>
+              <button 
+                onClick={reset}
+                className="text-xs flex items-center gap-1 text-slate-400 hover:text-indigo-600 transition-colors uppercase font-bold"
+              >
+                <RotateCcw className="w-3 h-3" /> Reset
+              </button>
+            </div>
+
+            <textarea
+              className="w-full min-h-[150px] p-4 bg-slate-50 border-2 border-slate-200 rounded-xl focus:ring-4 focus:ring-indigo-100 focus:border-indigo-600 transition-all outline-none resize-none placeholder:text-slate-400"
+              placeholder="Enter your prompt or ideas here..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+            />
+
+            <button
+              onClick={handleAnalyze}
+              disabled={isLoading || !input}
+              className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${
+                isLoading || !input 
+                ? 'bg-slate-200 text-slate-400 cursor-not-allowed' 
+                : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-200'
+              }`}
+            >
+              {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+              {isLoading ? 'Analyzing...' : 'Analyze'}
+            </button>
+
+            {feedback && (
+              <div className="mt-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex items-center gap-2 mb-3">
+                   <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
+                      <Sparkles className="w-4 h-4" />
+                   </div>
+                   <label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Expert Feedback</label>
+                </div>
+                <div className="p-6 bg-white border-2 border-indigo-100 rounded-xl whitespace-pre-wrap text-slate-700 leading-relaxed shadow-inner">
+                  {feedback}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </main>
+
+      <footer className="max-w-4xl mx-auto mt-12 text-center text-slate-400 text-sm">
+        <p>Built for effective prompt engineering. Inspired by the Anthropic Prompting Course.</p>
+      </footer>
+    </div>
+  );
+};
+
+export default App;
