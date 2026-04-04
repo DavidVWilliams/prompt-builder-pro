@@ -57,8 +57,8 @@ const App = () => {
     setFeedback('');
 
     try {
-      // Using v1beta and the "-latest" tag to ensure it finds the model AND accepts instructions
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+      // We use v1beta to support system instructions, and upgrade to the active 2.5 Flash model!
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
       
       const payload = {
         contents: [{ parts: [{ text: input }] }],
