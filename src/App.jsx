@@ -16,9 +16,6 @@ const App = () => {
   const [feedback, setFeedback] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // YOUR API KEY
-  const apiKey = "AIzaSyA5gOfetlZxzpR-YM4W9FN-rXdCcUiNfPs";
-
   const techniques = {
     externalize: {
       title: "Externalize Brain",
@@ -57,31 +54,26 @@ const App = () => {
     setFeedback('');
 
     try {
-      // We use v1beta to support system instructions, and upgrade to the active 2.5 Flash model!
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-      
-      const payload = {
-        contents: [{ parts: [{ text: input }] }],
-        systemInstruction: { parts: [{ text: techniques[activeTab].systemInstruction }] }
-      };
-
-      const response = await fetch(url, {
+      // NEW: We call our own Vercel middleman instead of Google!
+      const response = await fetch('/api/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          input: input,
+          systemInstruction: techniques[activeTab].systemInstruction
+        })
       });
 
       const data = await response.json();
       
-      if (data.error) {
-        throw new Error(data.error.message || "Failed to connect to AI.");
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to connect to the server.");
       }
 
-      const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "No feedback generated.";
-      setFeedback(aiText);
+      setFeedback(data.text);
     } catch (error) {
       console.error("Analysis Error:", error);
-      setFeedback(`Error: ${error.message}. Please check your connection or API key.`);
+      setFeedback(`Error: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -98,7 +90,7 @@ const App = () => {
         <h1 className="text-3xl font-bold flex items-center gap-2 mb-2">
           <Sparkles className="text-indigo-600" /> Prompt Builder Pro
         </h1>
-        <p className="text-slate-500 font-medium">Anthropic Edition (via Gemini 1.5 Flash)</p>
+        <p className="text-slate-500 font-medium">Anthropic Edition (Secured by Vercel)</p>
       </header>
 
       <main className="max-w-4xl mx-auto space-y-6">
@@ -182,10 +174,6 @@ const App = () => {
           </div>
         </div>
       </main>
-
-      <footer className="max-w-4xl mx-auto mt-12 text-center text-slate-400 text-sm">
-        <p>Built for effective prompt engineering. Inspired by the Anthropic Prompting Course.</p>
-      </footer>
     </div>
   );
 };
