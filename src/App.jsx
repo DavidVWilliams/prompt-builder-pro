@@ -57,7 +57,8 @@ const App = () => {
     setFeedback('');
 
     try {
-      const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+      // Using v1beta and the "-latest" tag to ensure it finds the model AND accepts instructions
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
       
       const payload = {
         contents: [{ parts: [{ text: input }] }],
