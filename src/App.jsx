@@ -18,7 +18,7 @@ import {
  * The apiKey is left empty as it is provided by the execution environment.
  */
 const callGemini = async (prompt, systemInstruction) => {
-  const apiKey = ""; 
+  const apiKey = "AIzaSyA5gOfetlZxzpR-YM4W9FN-rXdCcUiNfPs"; 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
   const payload = {
