@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   BrainCircuit, 
-  User, 
+  User as UserIcon, 
   AlertTriangle, 
   ListPlus, 
   Send, 
@@ -9,8 +9,44 @@ import {
   Copy, 
   CheckCheck,
   RefreshCw,
-  MessageSquareQuote
+  MessageSquareQuote,
+  History,
+  Trash2,
+  Wrench,
+  LogOut
 } from 'lucide-react';
+
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  onAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut
+} from 'firebase/auth';
+import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc } from 'firebase/firestore';
+
+// ==========================================
+// PASTE YOUR FIREBASE CONFIG KEYS BELOW
+// ==========================================
+const firebaseConfig = {
+  apiKey: "AIzaSyArN_Mn0tsPCwcO-TefM8o0pZbCXfw0Ydk",
+  authDomain: "prompt-builder-pro-7992d.firebaseapp.com",
+  projectId: "prompt-builder-pro-7992d",
+  storageBucket: "prompt-builder-pro-7992d.firebasestorage.app",
+  messagingSenderId: "647315492798",
+  appId: "1:647315492798:web:4a5db5458d364e0cf573ef",
+  measurementId: "G-RCZLTZQ64P"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = 'prompt-builder-pro'; // Internal ID for your database folder
+const hasFirebase = true;
+// ==========================================
 
 export default function App() {
   const [currentPrompt, setCurrentPrompt] = useState("");
@@ -19,8 +55,68 @@ export default function App() {
   const [aiResponse, setAiResponse] = useState("");
   const [copied, setCopied] = useState(false);
   
-  // Reference to auto-scroll to the output on mobile
+  // History & Auth State
+  const [sidebarTab, setSidebarTab] = useState('tools');
+  const [history, setHistory] = useState([]);
+  const [user, setUser] = useState(null);
+  
   const outputRef = useRef(null);
+
+  // --- FIREBASE AUTH & HISTORY LISTENER ---
+  useEffect(() => {
+    if (!hasFirebase) return;
+    
+    const initAuth = async () => {
+      try {
+        await auth.authStateReady(); 
+        if (!auth.currentUser) {
+          await signInAnonymously(auth); // Fallback to Guest mode if not logged in
+        }
+      } catch (err) {
+        console.error("Auth init error:", err);
+      }
+    };
+    initAuth();
+
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!hasFirebase || !user) return;
+    
+    // Listen to the user's private prompt collection
+    const colRef = collection(db, 'artifacts', appId, 'users', user.uid, 'prompts');
+    const unsubscribe = onSnapshot(colRef, (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      docs.sort((a, b) => b.createdAt - a.createdAt); // Newest first
+      setHistory(docs);
+    }, (error) => {
+      console.error("Firestore error:", error);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // --- GOOGLE AUTHENTICATION HANDLERS ---
+  const handleGoogleLogin = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error("Login failed:", error);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      await signInAnonymously(auth); // Return them to guest mode seamlessly
+      setHistory([]); // Clear local history view
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+  };
 
   const tools = [
     {
@@ -36,7 +132,7 @@ export default function App() {
     },
     {
       id: 'tempagency',
-      icon: User,
+      icon: UserIcon,
       name: "Temp Agency Test",
       desc: "Check if your prompt relies on hidden context.",
       quote: `"Imagine you hired a temp agency... they don't know the name of your company."`,
@@ -82,7 +178,7 @@ export default function App() {
     setAiResponse("");
     
     try {
-      // securely calls your Vercel backend
+      // Securely calls your Vercel backend
       const response = await fetch('/api/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -100,7 +196,21 @@ export default function App() {
 
       setAiResponse(data.text);
       
-      // Auto-scroll to the AI output on mobile devices so the user doesn't have to hunt for it
+      // Save to History Database
+      const historyItem = {
+        prompt: currentPrompt,
+        response: data.text,
+        toolId: activeTool,
+        createdAt: Date.now()
+      };
+
+      if (hasFirebase && user) {
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'prompts'), historyItem);
+      } else {
+        setHistory(prev => [historyItem, ...prev]); // Fallback memory
+      }
+
+      // Auto-scroll on mobile
       setTimeout(() => {
         outputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 100);
@@ -110,6 +220,22 @@ export default function App() {
       setAiResponse(`Error: ${error.message}`);
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const loadHistoryItem = (item) => {
+    setCurrentPrompt(item.prompt);
+    setAiResponse(item.response);
+    setActiveTool(item.toolId);
+    setSidebarTab('tools'); 
+  };
+
+  const deleteHistoryItem = async (id, e) => {
+    e.stopPropagation();
+    if (hasFirebase && user && typeof id === 'string') {
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'prompts', id));
+    } else {
+      setHistory(prev => prev.filter(item => (item.id || item.createdAt) !== id));
     }
   };
 
@@ -128,12 +254,18 @@ export default function App() {
     document.body.removeChild(textArea);
   };
 
+  const clearEditor = () => {
+    setCurrentPrompt("");
+    setAiResponse("");
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col md:flex-row">
       
-      {/* Sidebar / Tools Panel - UNPINNED ON MOBILE */}
-      <div className="w-full md:w-80 bg-white border-b md:border-r border-slate-200 flex flex-col shadow-sm z-10 md:h-screen md:sticky md:top-0 md:overflow-y-auto shrink-0">
-        <div className="p-4 md:p-6 border-b border-slate-200 bg-slate-900 text-white">
+      {/* Sidebar - Tools & History */}
+      <div className="w-full md:w-80 bg-white border-b md:border-r border-slate-200 flex flex-col shadow-sm z-10 md:h-screen md:sticky md:top-0 md:overflow-hidden shrink-0">
+        
+        <div className="p-4 md:p-6 border-b border-slate-200 bg-slate-900 text-white shrink-0">
           <div className="flex items-center gap-2 mb-1">
             <BrainCircuit className="w-6 h-6 text-indigo-400" />
             <h1 className="text-xl font-bold tracking-tight">Prompt Builder <span className="text-indigo-400">Pro</span></h1>
@@ -141,44 +273,142 @@ export default function App() {
           <p className="text-xs text-slate-400 mt-2 font-medium uppercase tracking-wider">Anthropic Roundtable Edition</p>
         </div>
 
-        <div className="p-4 flex-1">
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4">Prompting Techniques</h2>
-          <div className="space-y-2">
-            {tools.map((tool) => (
-              <button
-                key={tool.id}
-                onClick={() => setActiveTool(tool.id)}
-                className={`w-full text-left p-3 rounded-xl transition-all duration-200 border flex flex-col gap-1
-                  ${activeTool === tool.id 
-                    ? 'bg-indigo-50 border-indigo-200 shadow-sm ring-1 ring-indigo-500/20' 
-                    : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300'
-                  }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${activeTool === tool.id ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
-                    <tool.icon className="w-4 h-4" />
-                  </div>
-                  <span className={`font-medium ${activeTool === tool.id ? 'text-indigo-900' : 'text-slate-700'}`}>
-                    {tool.name}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 ml-[44px] leading-relaxed hidden sm:block md:block">{tool.desc}</p>
-              </button>
-            ))}
-          </div>
+        {/* Sidebar Tabs */}
+        <div className="flex border-b border-slate-200 shrink-0">
+          <button 
+            onClick={() => setSidebarTab('tools')} 
+            className={`flex-1 p-3 text-sm font-semibold flex items-center justify-center gap-2 transition-colors ${sidebarTab === 'tools' ? 'border-b-2 border-indigo-600 text-indigo-700 bg-indigo-50/50' : 'text-slate-500 hover:bg-slate-50'}`}
+          >
+            <Wrench className="w-4 h-4" /> Techniques
+          </button>
+          <button 
+            onClick={() => setSidebarTab('history')} 
+            className={`flex-1 p-3 text-sm font-semibold flex items-center justify-center gap-2 transition-colors ${sidebarTab === 'history' ? 'border-b-2 border-indigo-600 text-indigo-700 bg-indigo-50/50' : 'text-slate-500 hover:bg-slate-50'}`}
+          >
+            <History className="w-4 h-4" /> History
+          </button>
         </div>
 
-        <div className="p-4 bg-slate-50 border-t border-slate-200 m-4 rounded-xl hidden sm:block">
-          <div className="flex items-start gap-2 text-indigo-600 mb-2">
-            <MessageSquareQuote className="w-4 h-4 mt-0.5 opacity-70 shrink-0" />
-            <p className="text-xs italic font-medium leading-relaxed text-slate-700">
-              {activeToolData.quote}
-            </p>
+        {/* Tab Content: Tools */}
+        {sidebarTab === 'tools' && (
+          <>
+            <div className="p-4 flex-1 overflow-y-auto">
+              <div className="space-y-2">
+                {tools.map((tool) => (
+                  <button
+                    key={tool.id}
+                    onClick={() => setActiveTool(tool.id)}
+                    className={`w-full text-left p-3 rounded-xl transition-all duration-200 border flex flex-col gap-1
+                      ${activeTool === tool.id 
+                        ? 'bg-indigo-50 border-indigo-200 shadow-sm ring-1 ring-indigo-500/20' 
+                        : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300'
+                      }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg ${activeTool === tool.id ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
+                        <tool.icon className="w-4 h-4" />
+                      </div>
+                      <span className={`font-medium ${activeTool === tool.id ? 'text-indigo-900' : 'text-slate-700'}`}>
+                        {tool.name}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 ml-[44px] leading-relaxed hidden sm:block md:block">{tool.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-200 m-4 rounded-xl hidden sm:block shrink-0">
+              <div className="flex items-start gap-2 text-indigo-600 mb-2">
+                <MessageSquareQuote className="w-4 h-4 mt-0.5 opacity-70 shrink-0" />
+                <p className="text-xs italic font-medium leading-relaxed text-slate-700">
+                  {activeToolData.quote}
+                </p>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Tab Content: History */}
+        {sidebarTab === 'history' && (
+          <div className="p-4 flex-1 overflow-y-auto space-y-3">
+            {history.length === 0 ? (
+              <div className="text-center py-8 px-4">
+                <History className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                <p className="text-sm text-slate-500 font-medium">No past prompts yet.</p>
+                <p className="text-xs text-slate-400 mt-1">Run an analysis to save it here.</p>
+              </div>
+            ) : (
+              history.map(item => {
+                const itemTool = tools.find(t => t.id === item.toolId);
+                return (
+                  <div 
+                    key={item.id || item.createdAt} 
+                    onClick={() => loadHistoryItem(item)} 
+                    className="p-3 border border-slate-200 rounded-xl hover:bg-indigo-50 hover:border-indigo-200 transition-colors cursor-pointer group"
+                  >
+                    <div className="flex justify-between items-center mb-1.5">
+                      <div className="flex items-center gap-1.5 text-indigo-600">
+                        {itemTool && <itemTool.icon className="w-3.5 h-3.5" />}
+                        <span className="text-xs font-bold">{itemTool?.name || 'Tool'}</span>
+                      </div>
+                      <button 
+                        onClick={(e) => deleteHistoryItem(item.id || item.createdAt, e)} 
+                        className="text-slate-300 hover:text-red-500 md:opacity-0 md:group-hover:opacity-100 transition-opacity p-1"
+                        title="Delete record"
+                      >
+                        <Trash2 className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                      </button>
+                    </div>
+                    <p className="text-sm text-slate-700 line-clamp-2 leading-snug">{item.prompt}</p>
+                    <p className="text-[10px] text-slate-400 mt-2 font-medium uppercase tracking-wider">
+                      {new Date(item.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                );
+              })
+            )}
           </div>
+        )}
+
+        {/* Auth Footer */}
+        <div className="p-4 border-t border-slate-200 bg-slate-50 shrink-0">
+          {user && !user.isAnonymous ? (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt="Profile" className="w-9 h-9 rounded-full border border-slate-200 shadow-sm" />
+                ) : (
+                  <div className="w-9 h-9 bg-indigo-200 text-indigo-700 rounded-full flex items-center justify-center font-bold text-sm shadow-sm">
+                    {user.email?.[0]?.toUpperCase() || 'U'}
+                  </div>
+                )}
+                <div className="text-sm">
+                  <p className="font-bold text-slate-800 leading-tight">{user.displayName || 'User'}</p>
+                  <p className="text-xs text-slate-500 truncate w-28 md:w-32">{user.email}</p>
+                </div>
+              </div>
+              <button 
+                onClick={handleLogout} 
+                className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-200 rounded-lg transition-colors" 
+                title="Sign Out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <button 
+              onClick={handleGoogleLogin}
+              className="w-full flex items-center justify-center gap-2 bg-white border border-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-slate-50 transition-colors shadow-sm"
+            >
+              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-4 h-4" alt="Google Logo" />
+              Sign in to sync history
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Main Content Area - FLEXIBLE ON MOBILE */}
+      {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-h-screen md:h-screen md:overflow-hidden">
         
         {/* Top Header */}
@@ -189,14 +419,14 @@ export default function App() {
           </h2>
           
           <button 
-            onClick={() => setCurrentPrompt("")}
-            className="text-sm text-slate-500 hover:text-slate-800 flex items-center gap-1 transition-colors bg-slate-100 md:bg-transparent px-3 py-1.5 md:px-0 md:py-0 rounded-lg md:rounded-none"
+            onClick={clearEditor}
+            className="text-sm text-slate-500 hover:text-slate-800 flex items-center gap-1 transition-colors bg-slate-100 md:bg-transparent px-3 py-1.5 md:px-0 md:py-0 rounded-lg md:rounded-none font-medium"
           >
-            <RefreshCw className="w-4 h-4" /> Clear Editor
+            <RefreshCw className="w-4 h-4" /> New Prompt
           </button>
         </header>
 
-        {/* Workspace - SCROLLS ON MOBILE */}
+        {/* Workspace */}
         <div className="flex-1 md:overflow-auto p-4 md:p-6 bg-slate-50 flex flex-col lg:flex-row gap-6">
           
           {/* Editor Column */}
@@ -293,5 +523,3 @@ export default function App() {
     </div>
   );
 }
-
-
